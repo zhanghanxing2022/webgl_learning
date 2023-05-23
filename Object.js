@@ -37,44 +37,21 @@ class ObjectLoader {
         attribute vec4 a_Color;
         attribute vec4 a_Normal;
         uniform mat4 u_MvpMatrix;
-
-        uniform mat4 u_MvpMatrixFromLight;
-        varying vec4 v_PositionFromLight;
-
         uniform mat4 u_ModelMatrix;
         uniform mat4 u_NormalMatrix;
-        uniform vec3 u_Color;//物体颜色
-        uniform vec3 u_LightDirection;//平行光
-        uniform vec3 u_AmbientLight;//环境光
-        uniform vec3 u_LightPosition;//点光源位置
-        uniform vec3 u_LightColor;//点光源颜色
-
-
+        varying vec3 v_Normal ;
         //fog
         varying float v_Dist;
 
         varying vec4 v_Color;
+		varying vec4 v_Position;
         void main() {
-          gl_Position = u_MvpMatrix * a_Position;
-
+          gl_Position = u_MvpMatrix * a_Position; 
           vec4 normal1 = u_NormalMatrix * a_Normal;
-          vec3 normal = normalize(normal1.xyz);
-          vec4 vertexPosition = u_ModelMatrix * a_Position;
-          vec3 pointLightDirection = normalize(u_LightPosition - vec3(vertexPosition));
-			vec3 reflect = normalize(reflect(- pointLightDirection,vec3(a_Normal)));
-
-          float nDotL = max(dot(u_LightDirection, normal), 0.0);
-          float pointNDotL = max(dot(pointLightDirection, normal), 0.0);
-          
-          vec3 u_DiffuseLight = vec3(1.0, 1.0, 1.0);
-          vec3 diffuse = u_DiffuseLight * u_Color * nDotL + u_LightColor*u_Color*pointNDotL;
-          vec3 ambient = u_AmbientLight * u_Color;
-
-          v_Color = vec4(diffuse + ambient, a_Color.a);
-
+          v_Normal = normalize(normal1.xyz);
+          v_Position = u_ModelMatrix * a_Position;
+          v_Color =a_Color;
           v_Dist = gl_Position.w;
-
-          v_PositionFromLight = u_MvpMatrixFromLight * a_Position;
         }`;
 
 		// Fragment shader program
@@ -82,35 +59,53 @@ class ObjectLoader {
         #ifdef GL_ES
         precision mediump float;
         #endif
-        uniform sampler2D u_ShadowMap;
-
         uniform vec3 u_FogColor;
         uniform vec2 u_FogDist;
+
+		uniform vec3 u_AmbientLight;//环境光
+        uniform vec3 u_LightPosition;//点光源位置
+        uniform vec3 u_LightColor;//点光源颜色
+		uniform vec3 u_Color;//平行光颜色
+        uniform vec3 u_LightDirection;//平行光
+
         varying vec4 v_Color;
         varying float v_Dist;
+		varying vec3 v_Normal ;
+		varying vec4 v_Position;
 
-        varying vec4 v_PositionFromLight;
         void main() {
-          vec3 shadowCoord = (v_PositionFromLight.xyz/v_PositionFromLight.w)/2.0 + 0.5;
-          vec4 rgbaDepth = texture2D(u_ShadowMap, shadowCoord.xy);
-          float depth = rgbaDepth.r;
-          float visibility = (shadowCoord.z > depth + 0.005) ? 0.7 : 1.0;
+			vec3 normal = normalize(v_Normal);
+			vec3 pointLightDirection = normalize(u_LightPosition - vec3(v_Position));
+		  vec3 pointReflect = normalize(reflect(- pointLightDirection,normal));
+		  vec3 lineReflect = normalize(reflect(- u_LightPosition,normal));
 
+          float nDotL = max(dot(u_LightDirection, normal), 0.0);
+          float pointNDotL = max(dot(pointLightDirection, normal), 0.0);//点光源（相机）反射光线与视线夹角是点光源与法向量夹角的2倍
+		  float pRdotV =max(dot(pointReflect,normal),0.0);
+		  float lRdotV = max(dot(lineReflect,normal),0.0);//线光源反射光线与视线夹角。
+          
+          vec3 u_DiffuseLight = vec3(1.0, 1.0, 1.0);
+		  vec3 spec = u_LightColor*pointNDotL* u_Color;
+          vec3 diffuse = u_LightColor *u_Color * pRdotV+ u_Color* lRdotV;
+        //   vec3 diffuse = u_DiffuseLight * u_Color * nDotL;
+          vec3 ambient = u_AmbientLight * u_Color;
+		 
+		  vec4 temp = vec4(spec+diffuse+ambient,v_Color.a);
           float fogFactor = clamp((u_FogDist.y - v_Dist) / (u_FogDist.y - u_FogDist.x), 0.0, 1.0);
-          vec3 color = mix(u_FogColor, vec3(v_Color), fogFactor);
-          gl_FragColor = vec4(color, v_Color.a);
+          vec3 color = mix(u_FogColor, vec3(temp), fogFactor);
+          gl_FragColor = vec4(color, temp.a);
         }`;
 
 		// Initialize shaders
-		
+
 		this.program = createProgram(this.gl, VSHADER_SOURCE, FSHADER_SOURCE);
 		if (!this.program) {
 			console.log('Failed to create program');
 			return;
 		}
 		// Initialize framebuffer object (FBO)  
-		
-		
+
+
 
 		this.gl.enable(this.gl.DEPTH_TEST);
 
